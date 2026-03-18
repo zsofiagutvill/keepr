@@ -1,0 +1,1537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storage Decisions</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<style>
+:root {
+  --bg:      #0d0d10;
+  --surf:    #14141a;
+  --raised:  #1b1b22;
+  --border:  #26262f;
+  --acc:     #00d4c8;
+  --acc2:    #00afa5;
+  --sel:     #f0a500;
+  --text:    #e6e6ec;
+  --muted:   #64647a;
+  --faint:   #1f1f28;
+  --keep-bg: #0f3322;
+  --keep-fg: #2ecc88;
+  --disc-bg: #2d1010;
+  --disc-fg: #ff6b6b;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 13px; overflow: hidden; height: 100vh; display: flex; flex-direction: column; position: relative; }
+
+/* ── TOPBAR ── */
+.topbar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--surf); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+.topbar-title { font-size: 14px; font-weight: 600; color: #c8cce0; letter-spacing: -0.01em; }
+.sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; flex-shrink: 0; }
+.btn { padding: 4px 14px; border-radius: 9999px; border: 2px solid #5a5e78; font-size: 12px; font-weight: 500; cursor: pointer; background: transparent; color: #c8cce0; white-space: nowrap; font-family: inherit; transition: all 0.12s; }
+.btn:hover { background: rgba(0,212,200,0.12); border-color: var(--acc); color: #a0f0ec; }
+.btn.acc { background: var(--acc); border-color: var(--acc2); color: #003a38; font-weight: 700; }
+.btn.acc:hover { background: var(--acc2); border-color: #177a75; }
+.btn.dim { color: #9098b8; border-color: #4a4e68; background: transparent; }
+.btn.dim:hover { color: #a0f0ec; background: rgba(0,212,200,0.1); border-color: var(--acc); }
+.view-toggle { display: flex; border: 2px solid #5a5e78; border-radius: 9999px; overflow: hidden; transition: border-color 0.12s; }
+.view-toggle:hover { border-color: var(--acc); }
+.vtab { padding: 4px 14px; font-size: 12px; font-weight: 500; cursor: pointer; background: transparent; color: #9098b8; border: none; font-family: inherit; transition: all 0.12s; }
+.vtab.on { background: var(--acc); color: #002825; font-weight: 700; }
+.vtab:hover:not(.on) { color: #a0f0ec; background: rgba(0,212,200,0.1); }
+.apikey-inp { padding: 4px 12px; border-radius: 9999px; border: 1.5px solid #4a4e62; background: #1a1c2e; color: #c8cce0; font-size: 11px; font-family: inherit; width: 200px; }
+.apikey-inp:focus { outline: none; border-color: var(--acc); }
+.apikey-inp::placeholder { color: var(--muted); }
+.spacer { flex: 1; }
+input[type=file] { display: none; }
+#unsavedDot { pointer-events: none; }
+.help-overlay { position: fixed; inset: 0; background: rgba(10,12,28,0.45); z-index: 99999; backdrop-filter: blur(3px); transition: opacity 0.2s; }
+.help-overlay.hidden { display: none; }
+.help-modal { position: fixed; top: 0; right: 0; bottom: 0; width: 380px; max-width: 90vw; background: var(--surf); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; z-index: 100000; box-shadow: -4px 0 24px rgba(0,0,0,0.4); transition: transform 0.25s ease; }
+.help-top { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--raised); }
+.help-top h2 { font-size: 15px; font-weight: 600; color: var(--text); }
+.help-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+.help-close:hover { color: var(--text); }
+.help-body { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+.help-body::-webkit-scrollbar { width: 3px; }
+.help-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.help-section { display: flex; flex-direction: column; gap: 8px; }
+.help-section h3 { font-size: 11px; font-weight: 700; color: var(--acc); text-transform: uppercase; letter-spacing: 0.08em; }
+.help-section ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.help-section ul li { font-size: 13px; color: #b0b8d0; line-height: 1.5; padding-left: 16px; position: relative; }
+.help-section ul li::before { content: "–"; position: absolute; left: 0; color: var(--acc); }
+.help-kbd { display: inline-block; background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: monospace; color: var(--text); }
+.help-tag { display: inline-block; border-radius: 9999px; padding: 1px 8px; font-size: 11px; font-weight: 600; margin: 0 2px; }
+.help-tag.keep { background: rgba(46,204,136,0.15); border: 1.5px solid #2ecc88; color: #1a8a50; }
+.help-tag.discard { background: rgba(255,107,107,0.15); border: 1.5px solid #ff6b6b; color: #c03030; }
+.help-tag.teal { background: rgba(0,212,200,0.12); border: 1.5px solid var(--acc); color: var(--acc); }
+.help-divider { height: 1px; background: var(--border); }
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; margin-right: 4px; transition: background 0.3s; }
+.sync-dot.connected { background: var(--keep-fg); }
+.sync-dot.syncing   { background: var(--sel); animation: pulse 0.8s infinite; }
+.sync-dot.error     { background: var(--disc-fg); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.sync-label { font-size: 11px; color: var(--muted); }
+.firebase-setup { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.firebase-setup.hidden { display: none; }
+.setup-card { background: var(--surf); border: 1px solid var(--border); border-radius: 12px; padding: 28px 32px; max-width: 480px; width: 100%; }
+.setup-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.setup-card p { font-size: 12px; color: var(--muted); margin-bottom: 20px; line-height: 1.6; }
+.setup-fields { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.setup-field { display: flex; flex-direction: column; gap: 3px; }
+.setup-field label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+.setup-field input { padding: 7px 12px; border-radius: 9999px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12px; font-family: inherit; }
+.setup-field input:focus { outline: none; border-color: var(--acc); }
+.setup-btns { display: flex; gap: 8px; justify-content: flex-end; }
+.setup-paste-hint { font-size: 11px; color: var(--muted); background: var(--raised); padding: 8px 14px; border-radius: 9999px; border: 1px solid var(--border); margin-bottom: 16px; font-family: monospace; line-height: 1.7; }
+
+/* ── LAYOUT ── */
+.layout { flex: 1; display: flex; overflow: hidden; }
+
+/* ── PHOTOS COLUMN ── */
+.photos-col { overflow-y: auto; overflow-x: clip; padding: 14px; display: flex; flex-direction: column; gap: 16px; min-width: 220px; }
+.photos-col::-webkit-scrollbar { width: 3px; }
+.photos-col::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── PHOTO BLOCK ── */
+.photo-block { background: var(--surf); border: 1px solid var(--border); border-radius: 10px; overflow: visible; }
+.pb-header { display: flex; align-items: center; gap: 5px; padding: 8px 12px; border-bottom: 1px solid #1e2038; background: #16182a; border-radius: 20px 20px 0 0; flex-wrap: wrap; }
+.pb-name { font-size: 12px; font-weight: 600; color: #c8cce0; flex: 1; min-width: 60px; background: transparent; border: none; outline: none; font-family: inherit; }
+.pb-name:focus { color: var(--acc); }
+.pb-btn { padding: 4px 11px; border-radius: 9999px; border: 2px solid #5a5e78; font-size: 11px; font-weight: 500; cursor: pointer; background: transparent; color: #c8cce0; font-family: inherit; transition: all 0.12s; white-space: nowrap; }
+.pb-btn:hover:not(:disabled) { background: rgba(0,212,200,0.12); border-color: var(--acc); color: #a0f0ec; }
+
+
+.pb-btn.ai { font-weight: 600; }
+
+.pb-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.pb-btn.place.active { background: rgba(0,212,200,0.18); border-color: var(--acc); color: #a0f0ec; font-weight: 600; }
+
+.pb-btn.danger { color: #e090a0; border-color: #7a3848; }
+.pb-btn.danger:hover { background: rgba(255,107,107,0.12); border-color: #ff6b6b; color: #ffb0c0; }
+.spinner { display: inline-block; width: 9px; height: 9px; border: 2px solid rgba(0,212,200,0.25); border-top-color: var(--acc); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 3px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* drop zone */
+.drop-zone { min-height: 100px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; cursor: pointer; padding: 24px; border: 1px dashed var(--border); margin: 10px; border-radius: 16px; transition: all 0.15s; }
+.drop-zone:hover, .drop-zone.over { border-color: var(--acc); background: rgba(0,212,200,0.03); }
+.drop-zone p { font-size: 14px; color: var(--muted); text-align: center; line-height: 1.8; }
+
+/* canvas container */
+.canvas-wrap { position: relative; line-height: 0; border-radius: 0 0 9px 9px; overflow: visible; cursor: crosshair; }
+.canvas-wrap.normal { cursor: default; }
+.canvas-wrap canvas { display: block; width: 100%; height: auto; }
+
+/* ── PIN LABELS ── */
+.pin { position: absolute; display: flex; align-items: center; gap: 3px; transform: translate(-50%, -50%); cursor: grab; user-select: none; z-index: 5; }
+.pin:active { cursor: grabbing; }
+.pin .dot {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--acc); border: 2px solid rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: #000; flex-shrink: 0;
+  font-family: 'Inter', sans-serif; letter-spacing: -0.03em;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,212,200,0.15);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.pin .dot.status-keep    { background: var(--keep-fg); color: #000; box-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 0 2px rgba(46,204,136,0.4); }
+.pin .dot.status-discard { background: var(--disc-fg); color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 0 2px rgba(255,107,107,0.4); }
+.pin .dot.status-tie     { background: var(--sel);     color: #000; box-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 0 2px rgba(240,165,0,0.4); }
+.pin .dot.status-pending { background: var(--acc);     color: #000; }
+.pin .dot.status-keep    { background: var(--keep-fg); color: #000; box-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 0 2px rgba(46,204,136,0.4); }
+.pin .dot.status-discard { background: var(--disc-fg); color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 0 2px rgba(255,107,107,0.4); }
+.pin .dot.status-tie     { background: var(--sel);     color: #000; box-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 0 2px rgba(240,165,0,0.4); }
+.pin .dot.status-pending { background: var(--acc);     color: #000; }
+.pin .lbl {
+  background: rgba(8,8,11,0.92); color: #fff;
+  font-size: 11px; font-weight: 500; padding: 3px 7px;
+  border-radius: 3px; border: 1px solid rgba(0,212,200,0.2);
+  white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+  pointer-events: none; font-family: 'Inter', sans-serif;
+  line-height: 1.4; display: inline-block;
+  transition: border-color 0.15s;
+}
+.pin.selected .dot { background: var(--sel); box-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 0 3px rgba(240,165,0,0.3); }
+.pin.selected .lbl { border-color: rgba(240,165,0,0.35); }
+
+/* add photo button */
+.add-photo { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px; border: 1px dashed var(--border); border-radius: 10px; cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; transition: all 0.15s; }
+.add-photo:hover { border-color: var(--acc); color: var(--acc); }
+
+/* ── RESIZER ── */
+.resizer { width: 5px; flex-shrink: 0; background: var(--border); cursor: col-resize; user-select: none; transition: background 0.15s; }
+.resizer:hover, .resizer.active { background: var(--acc); }
+
+/* ── TABLE COLUMN ── */
+.table-col { flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; background: #f8f8fa; border-left: 1px solid #d0d4dc; min-width: 300px; }
+.table-col.hidden { width: 0 !important; min-width: 0; overflow: hidden; border: none; }
+.t-header { padding: 8px 12px; background: #eef0f4; border-bottom: 1px solid #d0d4dc; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.t-title { font-size: 10px; font-weight: 600; color: #4a4d64; text-transform: uppercase; letter-spacing: 0.09em; flex: 1; }
+.add-row-btn { padding: 5px 12px; font-size: 12px; font-weight: 600; border-radius: 9999px; border: 1.5px solid #009d93; color: #009d93; background: transparent; cursor: pointer; font-family: inherit; transition: all 0.12s; }
+.add-row-btn:hover { background: rgba(0,157,147,0.1); }
+.search-inp { padding: 4px 12px; border-radius: 9999px; border: 2px solid #b0b8cc; background: #ffffff; color: #1a1c26; font-size: 12px; font-family: inherit; width: 130px; }
+.search-inp:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px rgba(0,212,200,0.12); }
+
+.t-scroll { flex: 1; overflow-y: auto; }
+.t-scroll::-webkit-scrollbar { width: 3px; }
+.t-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead { position: sticky; top: 0; z-index: 5; }
+th { padding: 7px 8px; font-size: 10px; font-weight: 600; color: #555870; text-transform: uppercase; letter-spacing: 0.07em; border-bottom: 1px solid #d0d4dc; background: #eef0f4; white-space: nowrap; text-align: left; }
+th.c { text-align: center; }
+td { padding: 6px 8px; border-bottom: 1px solid #e4e6ec; vertical-align: middle; }
+tr:hover td { background: rgba(0,122,200,0.04); }
+tr.sel td { background: rgba(0,212,200,0.07); }
+
+/* cells */
+.c-num { width: 52px; white-space: nowrap; }
+.drag-handle { cursor: grab; color: #6870a0; font-size: 14px; padding: 0 4px; opacity: 0.5; transition: opacity 0.15s; line-height: 1; user-select: none; }
+.drag-handle:hover { opacity: 1; color: var(--acc); }
+tr.dragging-row { opacity: 0.4; }
+tr.drag-over-row td { border-top: 2px solid var(--acc); }
+.c-photo { width: 46px; font-size: 10px; color: #6870a0; }
+.c-name { min-width: 100px; }
+.c-votes { width: 200px; }
+.c-notes { min-width: 80px; }
+.c-final { width: 76px; }
+.c-del { width: 24px; text-align: center; }
+
+.nbadge { width: 22px; height: 22px; border-radius: 50%; background: var(--acc); color: #000; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; cursor: pointer; flex-shrink: 0; letter-spacing: -0.03em; font-family: 'Inter', sans-serif; transition: background 0.12s; }
+tr.sel .nbadge { background: var(--sel); color: #fff; }
+
+.name-inp { background: transparent; border: none; color: #1a1c26; font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif; width: 100%; outline: none; }
+.name-inp:focus { color: #000; }
+
+/* compact voter chips */
+.voter-row { display: flex; gap: 3px; }
+.chip { display: flex; align-items: center; gap: 3px; background: #e8eaf0; border: 1px solid #c8ccd8; border-radius: 9999px; padding: 3px 6px; height: 26px; }
+.chip-name { font-size: 10px; font-weight: 700; color: #3a3d52; min-width: 18px; text-align: center; letter-spacing: 0.03em; }
+.vk, .vd { width: 20px; height: 20px; border-radius: 9999px; border: 2px solid #b0b8cc; font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit; background: #ffffff; color: #3a3d52; display: flex; align-items: center; justify-content: center; transition: all 0.1s; padding: 0; }
+.vk:hover { border-color: #2ecc88; background: rgba(46,204,136,0.12); color: #1a7a48; }
+.vd:hover { border-color: #ff6b6b; background: rgba(255,107,107,0.12); color: #c03030; }
+.vk.on { background: rgba(46,204,136,0.15); border-color: #2ecc88; color: #1a7a48; }
+.vd.on { background: rgba(255,107,107,0.15); border-color: #ff6b6b; color: #c03030; }
+
+.notes-ta { background: transparent; border: none; color: #9090a8; font-size: 11px; font-family: 'Inter', sans-serif; width: 100%; outline: none; resize: none; overflow: hidden; min-height: 18px; }
+.notes-ta:focus { color: #1a1c2e; }
+.notes-ta::placeholder { color: #a0a4b8; }
+
+.final-pill { padding: 4px 12px; border-radius: 9999px; font-size: 11px; font-weight: 600; cursor: pointer; border: 2px solid transparent; white-space: nowrap; letter-spacing: 0.02em; display: block; width: 100%; font-family: inherit; text-align: center; transition: all 0.12s; line-height: 1.4; }
+.final-pill.keep    { background: rgba(46,204,136,0.12); border-color: #2ecc88; color: #1a8a50; }
+.final-pill.discard { background: rgba(255,107,107,0.12); border-color: #ff6b6b; color: #c03030; }
+.final-pill.tie     { background: rgba(240,165,0,0.12); border-color: #f0a500; color: #a07000; }
+.final-pill.pending { background: rgba(90,94,120,0.08); border-color: #9aa0b8; color: #6870a0; }
+.final-inp { display: none; padding: 4px 10px; border-radius: 9999px; border: 1px solid #c0c4d4; background: #ffffff; color: #1a1c26; font-size: 11px; font-family: inherit; width: 100%; flex: 1; }
+.final-reset { display: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid #9098b8; background: #24263a; color: #9098b8; font-size: 11px; cursor: pointer; flex-shrink: 0; align-items: center; justify-content: center; transition: all 0.12s; padding: 0; font-family: inherit; line-height: 1; }
+.final-reset:hover { border-color: var(--acc); color: var(--acc); }
+.final-reset.visible { display: flex; }
+.final-wrap { position: relative; display: flex; align-items: center; gap: 4px; }
+.final-inp:focus { outline: none; border-color: var(--acc); }
+
+.del-btn { background: none; border: none; color: #b0b8cc; cursor: pointer; font-size: 14px; transition: color 0.1s; padding: 2px 4px; opacity: 0.5; }
+.del-btn:hover { color: #ff6b6b; opacity: 1; }
+
+.t-footer { padding: 6px 10px; border-top: 1px solid #c8e8e6; flex-shrink: 0; background: rgba(0,212,200,0.06); }
+.t-footer input { width: 100%; padding: 6px 14px; border-radius: 9999px; border: 2px solid #b0c8c6; background: #ffffff; color: #1a1c26; font-size: 12px; font-family: inherit; transition: border-color 0.12s; }
+.t-footer input::placeholder { color: #9ab8b6; }
+.t-footer input:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px rgba(0,212,200,0.1); }
+
+.t-stats { padding: 5px 12px; border-top: 1px solid #d0d4dc; display: flex; gap: 12px; flex-shrink: 0; background: #eef0f4; flex-wrap: wrap; }
+.ts { font-size: 12px; color: #4a4d64; }
+.ts b { font-weight: 700; }
+.ts .k { color: var(--keep-fg); }
+.ts .d { color: var(--disc-fg); }
+.ts .t { color: var(--sel); }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <span class="topbar-title">Keepr</span>
+  <div class="sep"></div>
+  <div class="view-toggle">
+    <button class="vtab on" id="vt-both"  onclick="setView('both')">Both</button>
+    <button class="vtab"    id="vt-photo" onclick="setView('photo')">Photos</button>
+    <button class="vtab"    id="vt-table" onclick="setView('table')">Table</button>
+  </div>
+  <div class="sep"></div>
+  <button class="btn acc" onclick="saveData(); clearUnsaved()" id="saveBtn" title="Downloads a backup file (.json) — use after a voting session or before sharing">Save backup</button><span id="unsavedDot" style="display:none;width:7px;height:7px;border-radius:50%;background:#f0a500;margin-left:-6px;margin-top:-10px;flex-shrink:0;" title="You have unsaved changes"></span>
+  <button class="btn dim" onclick="document.getElementById('loadIn').click()" title="Load a previously saved backup file (.json) to restore all items, votes and photos">Load backup</button>
+  <input type="file" id="loadIn" accept=".json" onchange="loadData(this)">
+  <div class="sep"></div>
+  <button class="btn dim" onclick="exportCSV()">⬇ CSV</button>
+  <button class="btn dim" onclick="exportStandaloneHTML()" title="Bake current data into a self-contained HTML file — share with anyone">⬇ Share HTML</button>
+  <div class="sep"></div>
+  <button class="btn dim" onclick="toggleHelp()" title="How to use Keepr">? Help</button>
+  <div class="spacer"></div>
+  <span class="sync-dot" id="syncDot"></span>
+  <span class="sync-label" id="syncLabel">Not connected</span>
+  <button class="btn dim" id="fbSetupBtn" onclick="showFirebaseSetup()">⚙ Firebase</button>
+</div>
+
+<!-- FIREBASE SETUP MODAL -->
+<div class="firebase-setup" id="fbSetup">
+  <div class="setup-card">
+    <h2>Connect to Firebase</h2>
+    <p>Paste your Firebase config below to enable real-time sync. Everyone who opens this tool with the same config will see changes instantly.<br><br>
+    Get your config at <strong>console.firebase.google.com</strong> → Project Settings → Your apps → Web app.</p>
+    <div class="setup-paste-hint" id="pasteHint" onclick="handlePasteConfig()" style="cursor:pointer; border-style:dashed;">
+      📋 Click here and paste your firebaseConfig block directly — it will be parsed automatically
+    </div>
+    <div class="setup-fields">
+      <div class="setup-field"><label>API Key</label><input id="fb-apiKey" placeholder="AIzaSy..."></div>
+      <div class="setup-field"><label>Project ID</label><input id="fb-projectId" placeholder="my-project-12345"></div>
+      <div class="setup-field"><label>App ID</label><input id="fb-appId" placeholder="1:123456:web:abc..."></div>
+      <div class="setup-field"><label>Auth Domain</label><input id="fb-authDomain" placeholder="my-project.firebaseapp.com"></div>
+      <div class="setup-field"><label>Storage Bucket</label><input id="fb-storageBucket" placeholder="my-project.appspot.com"></div>
+      <div class="setup-field"><label>Messaging Sender ID</label><input id="fb-messagingSenderId" placeholder="123456789"></div>
+    </div>
+    <div class="setup-btns">
+      <button class="btn dim" onclick="document.getElementById('fbSetup').classList.add('hidden')">Cancel</button>
+      <button class="btn acc" onclick="connectFirebase()">Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- HELP MODAL -->
+<div class="help-overlay hidden" id="helpOverlay" onclick="closeHelpIfBg(event)">
+  <div class="help-modal">
+    <div class="help-top">
+      <h2>How to use Keepr</h2>
+      <button class="help-close" onclick="toggleHelp()">✕</button>
+    </div>
+    <div class="help-body">
+
+      <div class="help-section">
+        <h3>Daily use</h3>
+        <ul>
+          <li><strong>Load photo</strong> — load a photo into a slot. Drag it onto the grey area or click the button.</li>
+          <li><strong>Place label</strong> — click to enter place mode (teal outline appears around photo), then click anywhere on the photo to drop a pin manually. Click the button again to exit.</li>
+          <li><strong>Export</strong> — saves this photo as a JPEG with all numbered labels burned in. Good for printing.</li>
+          <li>Edit any item name in the table — the pin on the photo updates instantly. Drag a pin to reposition it. Drag <strong>⠿</strong> to reorder rows.</li>
+        </ul>
+      </div>
+
+      <div class="help-divider"></div>
+
+      <div class="help-section">
+        <h3>Voting</h3>
+        <ul>
+          <li>Click <span class="help-tag keep">✓</span> or <span class="help-tag discard">✕</span> for each item. Click again to clear. The <strong>Final</strong> column auto-calculates by majority.</li>
+          <li>Click a Final pill to type a custom decision (e.g. "Donate"). Click <strong>↺</strong> to revert to auto.</li>
+          <li>Pin colours: <span class="help-tag teal">teal</span> = pending · green = keep · red = discard · amber = tie.</li>
+        </ul>
+      </div>
+
+      <div class="help-divider"></div>
+
+      <div class="help-section">
+        <h3>Saving &amp; sharing</h3>
+        <ul>
+          <li><strong>Save backup</strong> — downloads a <span class="help-kbd">.json</span> file with everything: items, votes, notes, photos. Do this after a voting session. The amber dot next to the button means you have unsaved changes.</li>
+          <li><strong>Load backup</strong> — restores from a <span class="help-kbd">.json</span> file. Use this to pick up where someone else left off.</li>
+          <li><strong>Export CSV</strong> — spreadsheet of all items and votes. Open in Excel or Google Sheets.</li>
+          <li><strong>Share file</strong> — exports a standalone <span class="help-kbd">.html</span> file with everything baked in. Send to anyone — they open it in a browser, no setup needed.</li>
+          <li>If the green dot shows <em>Live sync</em>, votes update in real time for everyone who has the file open.</li>
+        </ul>
+      </div>
+
+      <div class="help-divider"></div>
+
+      <div class="help-section">
+        <h3>Getting an update from the developer</h3>
+        <ul>
+          <li>When a new version of Keepr is ready, you'll receive a new <span class="help-kbd">.html</span> file.</li>
+          <li>Before updating: click <strong>Save backup</strong> to download your <span class="help-kbd">.json</span> data file.</li>
+          <li>Go to your Netlify project page → Production deploys → click <strong>browse to upload</strong> → select the new <span class="help-kbd">.html</span> file. Your URL stays the same.</li>
+          <li>Once updated, click <strong>Load backup</strong> and select your saved <span class="help-kbd">.json</span> file to restore all your data.</li>
+        </ul>
+      </div>
+
+      <div class="help-divider"></div>
+
+      <div class="help-section">
+        <h3>Troubleshooting</h3>
+        <ul>
+          <li><strong>No green dot / not syncing</strong> — click <strong>⚙ Firebase</strong> and hit Connect. Check your internet connection.</li>
+          <li><strong>Photos blank after sharing</strong> — each person loads their own photos once. Label positions sync automatically.</li>
+          <li><strong>Auto-label not working</strong> — check the API key field in the top bar starts with <span class="help-kbd">sk-ant-</span>.</li>
+          <li><strong>Something broken</strong> — save a backup, reload the page. If still broken, load the backup to restore your data.</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- LAYOUT -->
+<div class="layout" id="layout">
+
+  <!-- PHOTOS -->
+  <div class="photos-col" id="photosCol" style="width:55%">
+    <div class="add-photo" id="addPhotoBtn" onclick="addPhoto()">＋ Add photo</div>
+  </div>
+
+  <!-- RESIZER -->
+  <div class="resizer" id="resizer"></div>
+
+  <!-- TABLE -->
+  <div class="table-col" id="tableCol" style="width:45%">
+    <div class="t-header">
+      <span class="t-title">All items</span>
+      <button class="add-row-btn" onclick="addItemManual()">＋ Add item</button>
+      <input class="search-inp" id="searchInp" placeholder="Search…" oninput="renderTable()">
+    </div>
+    <div class="t-scroll" id="tScroll">
+      <table>
+        <thead><tr>
+          <th class="c-num">#</th>
+          <th class="c-photo c">Photo</th>
+          <th class="c-name">Item</th>
+          <th class="c-votes c">SG &nbsp; AM &nbsp; ZG &nbsp; KJ</th>
+          <th class="c-notes">Notes</th>
+          <th class="c-final c">Final</th>
+          <th class="c-del"></th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="t-footer">
+      <input id="newItemInp" placeholder="New item name… Enter to add" onkeydown="if(event.key==='Enter')addItemManual()">
+    </div>
+    <div class="t-stats" id="tStats"></div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════
+const VOTERS = ['SG','AM','ZG','KJ'];
+let nextN = 1;
+let selectedN = null;
+
+// Global items list: [{n, t}]
+let items = [];
+
+// Per-item decision data
+let votes    = {}; // {n: {SG,AM,ZG,KJ}} each null|'K'|'D'
+let notesMap = {}; // {n: string}
+let finals   = {}; // {n: {override:bool, value:string}}
+
+// Photos: [{id, name, img(dataURL), imgEl, labels:[{n,x,y}]}]
+let photos = [];
+let nextPhotoId = 1;
+
+// Drag state
+let dragState = null;
+
+// Place mode: which photo is in click-to-place mode
+let placeMode = null; // photo id or null
+
+
+// ══════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════
+function mkItem(name) {
+  const n = nextN++;
+  items.push({ n, t: name });
+  votes[n]    = { SG:null, AM:null, ZG:null, KJ:null };
+  notesMap[n] = '';
+  finals[n]   = { override:false, value:'' };
+  return n;
+}
+
+function deleteItemFull(n) {
+  items      = items.filter(it => it.n !== n);
+  photos.forEach(ph => { ph.labels = ph.labels.filter(l => l.n !== n); });
+  delete votes[n]; delete notesMap[n]; delete finals[n];
+  if (selectedN === n) selectedN = null;
+}
+
+function photoForItem(n) {
+  for (const ph of photos) {
+    if (ph.labels.find(l => l.n === n)) return ph;
+  }
+  return null;
+}
+
+// ══════════════════════════════════════════════
+// VIEW
+// ══════════════════════════════════════════════
+function setView(v) {
+  const pc = document.getElementById('photosCol');
+  const tc = document.getElementById('tableCol');
+  const rs = document.getElementById('resizer');
+  pc.style.display = (v === 'table') ? 'none' : '';
+  rs.style.display = (v !== 'both') ? 'none' : '';
+  tc.classList.toggle('hidden', v === 'photo');
+  ['both','photo','table'].forEach(x =>
+    document.getElementById('vt-'+x).classList.toggle('on', x === v));
+}
+
+// ══════════════════════════════════════════════
+// PHOTOS — BUILD & MANAGE
+// ══════════════════════════════════════════════
+function addPhoto() {
+  const ph = { id: nextPhotoId++, name: `Photo ${photos.length+1}`, img: null, imgEl: null, labels: [] };
+  photos.push(ph);
+  const col = document.getElementById('photosCol');
+  col.insertBefore(buildPhotoBlock(ph), document.getElementById('addPhotoBtn'));
+}
+
+function buildPhotoBlock(ph) {
+  const wrap = document.createElement('div');
+  wrap.className = 'photo-block';
+  wrap.dataset.pid = ph.id;
+
+  // ── header ──
+  const hdr = document.createElement('div');
+  hdr.className = 'pb-header';
+
+  const nameInp = document.createElement('input');
+  nameInp.className = 'pb-name'; nameInp.value = ph.name;
+  nameInp.addEventListener('input', () => { ph.name = nameInp.value; renderTable(); });
+
+  // Load
+  const fi = document.createElement('input'); fi.type='file'; fi.accept='image/*';
+  fi.addEventListener('change', () => { if(fi.files[0]) loadPhotoFile(ph, fi.files[0], wrap); fi.value=''; });
+  const loadBtn = document.createElement('button');
+  loadBtn.className = 'pb-btn load'; loadBtn.textContent = 'Load photo';
+  loadBtn.onclick = () => fi.click();
+
+  // AI Auto-label
+  // Auto-label disabled
+  const aiBtn = null;
+
+  // Place mode toggle
+  const placeBtn = document.createElement('button');
+  placeBtn.className = 'pb-btn place'; placeBtn.textContent = 'Place label';
+  placeBtn.title = 'Click to toggle — then click anywhere on the photo to drop a new label';
+  placeBtn.onclick = () => togglePlaceMode(ph.id, placeBtn, wrap);
+
+  // Export
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'pb-btn'; exportBtn.textContent = 'Export';
+  exportBtn.onclick = () => exportPhoto(ph);
+
+  // Remove
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'pb-btn danger'; removeBtn.textContent = '✕';
+  removeBtn.title = 'Remove photo (labels are kept in table)';
+  removeBtn.onclick = () => {
+    if (!confirm(`Remove photo "${ph.name}"? Labels stay in the table.`)) return;
+    ph.img = null; ph.imgEl = null;
+    wrap.querySelector('.canvas-wrap') && wrap.querySelector('.canvas-wrap').remove();
+    const dz = makeDZ(ph, wrap, fi);
+    wrap.appendChild(dz);
+    if (placeMode === ph.id) { placeMode = null; placeBtn.classList.remove('active'); }
+  };
+
+  hdr.append(nameInp, loadBtn, fi, placeBtn, exportBtn, removeBtn);
+  wrap.appendChild(hdr);
+
+  if (ph.img) {
+    wrap.appendChild(makeCanvasWrap(ph));
+  } else {
+    wrap.appendChild(makeDZ(ph, wrap, fi));
+  }
+  return wrap;
+}
+
+function makeDZ(ph, wrap, fi) {
+  const dz = document.createElement('div'); dz.className = 'drop-zone';
+  dz.innerHTML = '<p>Drop photo here or click <strong>Load photo</strong></p>';
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if (f && f.type.startsWith('image/')) loadPhotoFile(ph, f, wrap);
+  });
+  dz.addEventListener('click', () => fi.click());
+  return dz;
+}
+
+function loadPhotoFile(ph, file, wrap) {
+  const r = new FileReader();
+  r.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      ph.img = ev.target.result; ph.imgEl = img;
+      if (ph.name.startsWith('Photo ')) ph.name = file.name.replace(/\.[^.]+$/,'');
+      wrap.querySelector('.pb-name').value = ph.name;
+      wrap.querySelector('.drop-area, .drop-zone') && wrap.querySelector('.drop-area, .drop-zone').remove();
+      wrap.querySelector('.canvas-wrap') && wrap.querySelector('.canvas-wrap').remove();
+      const cw = makeCanvasWrap(ph);
+      wrap.appendChild(cw);
+      renderTable();
+      // Push photo to Firebase so others see it automatically
+      schedulePush(300);
+    };
+    img.src = ev.target.result;
+  };
+  r.readAsDataURL(file);
+}
+
+// ── Canvas wrap + pin rendering ──
+function makeCanvasWrap(ph) {
+  const cw = document.createElement('div');
+  cw.className = 'canvas-wrap normal'; cw.dataset.pid = ph.id;
+
+  const canvas = document.createElement('canvas');
+  canvas.width  = ph.imgEl.naturalWidth;
+  canvas.height = ph.imgEl.naturalHeight;
+  canvas.style.width = '100%'; canvas.style.height = 'auto';
+  canvas.style.aspectRatio = `${ph.imgEl.naturalWidth} / ${ph.imgEl.naturalHeight}`;
+  canvas.getContext('2d').drawImage(ph.imgEl, 0, 0);
+  cw.appendChild(canvas);
+
+  // Click to place
+  cw.addEventListener('contextmenu', e => e.preventDefault());
+  cw.addEventListener('click', e => {
+    if (placeMode !== ph.id) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top)  / rect.height;
+    const name = prompt('Item name:', `Item ${nextN}`);
+    if (name === null) return;
+    const n = mkItem(name.trim() || `Item ${nextN-1}`);
+    ph.labels.push({ n, x, y });
+    renderPins(ph, cw);
+    renderTable();
+    selectItem(n);
+    schedulePush();
+  });
+
+  // ResizeObserver keeps pins accurate
+  if (cw._ro) cw._ro.disconnect();
+  cw._ro = new ResizeObserver(() => requestAnimationFrame(() => renderPins(ph, cw)));
+  cw._ro.observe(canvas);
+
+  renderPins(ph, cw);
+  return cw;
+}
+
+function renderPins(ph, cw) {
+  cw.querySelectorAll('.pin').forEach(e => e.remove());
+  if (!ph.imgEl) return;
+  const canvas = cw.querySelector('canvas'); if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const sx = rect.width  / ph.imgEl.naturalWidth;
+  const sy = rect.height / ph.imgEl.naturalHeight;
+
+  ph.labels.forEach(pos => {
+    const item = items.find(it => it.n === pos.n); if (!item) return;
+    const pin = document.createElement('div');
+    pin.className = 'pin' + (selectedN === pos.n ? ' selected' : '');
+    pin.dataset.n = pos.n;
+    pin.style.left = (pos.x * ph.imgEl.naturalWidth * sx) + 'px';
+    pin.style.top  = (pos.y * ph.imgEl.naturalHeight * sy) + 'px';
+    const auto = calcAuto(pos.n);
+    pin.innerHTML  = `<div class="dot status-${auto.cls}">${pos.n}</div><div class="lbl">${item.t}</div>`;
+
+    // Drag pin
+    pin.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      e.stopPropagation(); e.preventDefault();
+      const canvas2 = cw.querySelector('canvas');
+      const r2 = canvas2.getBoundingClientRect();
+      dragState = {
+        ph, pos, pin, cw,
+        offX: e.clientX - r2.left - pos.x * ph.imgEl.naturalWidth * sx,
+        offY: e.clientY - r2.top  - pos.y * ph.imgEl.naturalHeight * sy
+      };
+    });
+    pin.addEventListener('touchstart', e => {
+      e.stopPropagation(); e.preventDefault();
+      const t = e.touches[0];
+      const canvas2 = cw.querySelector('canvas');
+      const r2 = canvas2.getBoundingClientRect();
+      dragState = {
+        ph, pos, pin, cw,
+        offX: t.clientX - r2.left - pos.x * ph.imgEl.naturalWidth * sx,
+        offY: t.clientY - r2.top  - pos.y * ph.imgEl.naturalHeight * sy
+      };
+    }, { passive: false });
+
+    // Click to select
+    pin.addEventListener('click', e => { e.stopPropagation(); selectItem(pos.n); });
+
+    cw.appendChild(pin);
+  });
+}
+
+function refreshPins(ph) {
+  const cw = document.querySelector(`.canvas-wrap[data-pid="${ph.id}"]`);
+  if (cw) renderPins(ph, cw);
+}
+
+function refreshAllPins() {
+  photos.forEach(ph => refreshPins(ph));
+}
+
+// ── drag ──
+document.addEventListener('mousemove', e => {
+  if (!dragState) return;
+  const { ph, pos, pin, cw } = dragState;
+  const canvas = cw.querySelector('canvas'); if (!canvas) return;
+  const r = canvas.getBoundingClientRect();
+  const sx = r.width  / ph.imgEl.naturalWidth;
+  const sy = r.height / ph.imgEl.naturalHeight;
+  pos.x = Math.max(0, Math.min(1, (e.clientX - r.left  - dragState.offX) / (ph.imgEl.naturalWidth  * sx)));
+  pos.y = Math.max(0, Math.min(1, (e.clientY - r.top   - dragState.offY) / (ph.imgEl.naturalHeight * sy)));
+  pin.style.left = (pos.x * ph.imgEl.naturalWidth  * sx) + 'px';
+  pin.style.top  = (pos.y * ph.imgEl.naturalHeight * sy) + 'px';
+});
+document.addEventListener('touchmove', e => {
+  if (!dragState) return;
+  const t = e.touches[0];
+  const { ph, pos, pin, cw } = dragState;
+  const canvas = cw.querySelector('canvas'); if (!canvas) return;
+  const r = canvas.getBoundingClientRect();
+  const sx = r.width  / ph.imgEl.naturalWidth;
+  const sy = r.height / ph.imgEl.naturalHeight;
+  pos.x = Math.max(0, Math.min(1, (t.clientX - r.left  - dragState.offX) / (ph.imgEl.naturalWidth  * sx)));
+  pos.y = Math.max(0, Math.min(1, (t.clientY - r.top   - dragState.offY) / (ph.imgEl.naturalHeight * sy)));
+  pin.style.left = (pos.x * ph.imgEl.naturalWidth  * sx) + 'px';
+  pin.style.top  = (pos.y * ph.imgEl.naturalHeight * sy) + 'px';
+}, { passive: false });
+document.addEventListener('mouseup',  () => { if(dragState) schedulePush(); dragState = null; });
+document.addEventListener('touchend', () => { dragState = null; });
+
+window.addEventListener('resize', () => photos.forEach(ph => refreshPins(ph)));
+
+// ── place mode ──
+function togglePlaceMode(pid, btn, wrap) {
+  if (placeMode === pid) {
+    placeMode = null;
+    btn.classList.remove('active');
+    const cw = wrap.querySelector('.canvas-wrap');
+    if (cw) cw.classList.add('normal');
+  } else {
+    // turn off any previous
+    document.querySelectorAll('.pb-btn.place.active').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.canvas-wrap').forEach(c => c.classList.add('normal'));
+    placeMode = pid;
+    btn.classList.add('active');
+    const cw = wrap.querySelector('.canvas-wrap');
+    if (cw) cw.classList.remove('normal');
+    if (!wrap.querySelector('.canvas-wrap')) alert('Load a photo first.');
+  }
+}
+
+// ══════════════════════════════════════════════
+// SELECTION — two-way: pin ↔ table row
+// ══════════════════════════════════════════════
+function selectItem(n) {
+  selectedN = n;
+  // highlight all pins
+  document.querySelectorAll('.pin').forEach(p =>
+    p.classList.toggle('selected', parseInt(p.dataset.n) === n));
+  // highlight table row
+  document.querySelectorAll('#tbody tr').forEach(r =>
+    r.classList.toggle('sel', parseInt(r.dataset.n) === n));
+  // scroll table row into view
+  const row = document.querySelector(`#tbody tr[data-n="${n}"]`);
+  if (row) row.scrollIntoView({ block: 'nearest' });
+}
+
+// ══════════════════════════════════════════════
+// TABLE
+// ══════════════════════════════════════════════
+function renderTable() {
+  const q = (document.getElementById('searchInp').value || '').toLowerCase();
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+
+  items
+    .filter(it => !q || it.t.toLowerCase().includes(q) || String(it.n).includes(q))
+    .forEach(item => {
+      const n = item.n;
+      const ph = photoForItem(n);
+      const tr = document.createElement('tr');
+      tr.dataset.n = n;
+      tr.draggable = true;
+      if (selectedN === n) tr.classList.add('sel');
+      tr.addEventListener('dragstart', e => { e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',n); setTimeout(()=>tr.classList.add('dragging-row'),0); });
+      tr.addEventListener('dragend', () => { tr.classList.remove('dragging-row'); document.querySelectorAll('.drag-over-row').forEach(r=>r.classList.remove('drag-over-row')); });
+      tr.addEventListener('dragover', e => { e.preventDefault(); document.querySelectorAll('.drag-over-row').forEach(r=>r.classList.remove('drag-over-row')); tr.classList.add('drag-over-row'); });
+      tr.addEventListener('dragleave', () => tr.classList.remove('drag-over-row'));
+      tr.addEventListener('drop', e => { e.preventDefault(); tr.classList.remove('drag-over-row'); const draggedN=parseInt(e.dataTransfer.getData('text/plain')); if(draggedN===n)return; const fi=items.findIndex(it=>it.n===draggedN),ti=items.findIndex(it=>it.n===n); if(fi<0||ti<0)return; const [m]=items.splice(fi,1); items.splice(ti,0,m); renderTable(); schedulePush(); });
+
+      // drag handle + # badge
+      const tdN = document.createElement('td'); tdN.className = 'c-num';
+      const numWrap = document.createElement('div');
+      numWrap.style.cssText = 'display:flex;align-items:center;gap:3px;';
+      const handle = document.createElement('span');
+      handle.className = 'drag-handle'; handle.textContent = '⠿'; handle.title = 'Drag to reorder';
+      const badge = document.createElement('div'); badge.className = 'nbadge';
+      badge.textContent = n; badge.onclick = () => selectItem(n);
+      numWrap.append(handle, badge); tdN.appendChild(numWrap);
+
+      // Photo label
+      const tdPh = document.createElement('td'); tdPh.className = 'c-photo';
+      tdPh.textContent = ph ? ph.name : '—';
+      tdPh.style.fontSize = '10px'; tdPh.style.color = 'var(--muted)';
+
+      // Name — TWO-WAY: edit here → updates pin label
+      const tdName = document.createElement('td'); tdName.className = 'c-name';
+      const ni = document.createElement('input');
+      ni.className = 'name-inp'; ni.value = item.t;
+      ni.addEventListener('input', () => {
+        item.t = ni.value;
+        document.querySelectorAll(`.pin[data-n="${n}"] .lbl`)
+          .forEach(el => el.textContent = ni.value);
+        schedulePush(1200); markUnsaved();
+      });
+      ni.addEventListener('focus', () => selectItem(n));
+      tdName.appendChild(ni);
+
+      // Votes
+      const tdV = document.createElement('td'); tdV.className = 'c-votes';
+      const vrow = document.createElement('div'); vrow.className = 'voter-row';
+      VOTERS.forEach(voter => {
+        const chip = document.createElement('div'); chip.className = 'chip';
+        const lbl  = document.createElement('span'); lbl.className = 'chip-name'; lbl.textContent = voter;
+        const bk   = document.createElement('button');
+        bk.className = 'vk' + (votes[n][voter]==='K' ? ' on' : '');
+        bk.textContent = '✓';
+        bk.onclick = () => { votes[n][voter] = votes[n][voter]==='K' ? null : 'K'; renderTable(); refreshAllPins(); selectItem(n); schedulePush(); markUnsaved(); };
+        const bd   = document.createElement('button');
+        bd.className = 'vd' + (votes[n][voter]==='D' ? ' on' : '');
+        bd.textContent = '✕';
+        bd.onclick = () => { votes[n][voter] = votes[n][voter]==='D' ? null : 'D'; renderTable(); refreshAllPins(); selectItem(n); schedulePush(); markUnsaved(); };
+        chip.append(lbl, bk, bd); vrow.appendChild(chip);
+      });
+      tdV.appendChild(vrow);
+
+      // Notes
+      const tdNt = document.createElement('td'); tdNt.className = 'c-notes';
+      const ta = document.createElement('textarea');
+      ta.className = 'notes-ta'; ta.rows = 1; ta.value = notesMap[n] || ''; ta.placeholder = '…';
+      ta.addEventListener('input', () => { notesMap[n] = ta.value; autoH(ta); schedulePush(1200); markUnsaved(); });
+      ta.addEventListener('focus', () => selectItem(n));
+      setTimeout(() => autoH(ta), 0);
+      tdNt.appendChild(ta);
+
+      // Final
+      const tdF = document.createElement('td'); tdF.className = 'c-final';
+      const f = finals[n], auto = calcAuto(n);
+      const pill = document.createElement('button');
+      pill.className = `final-pill ${f.override && f.value ? 'override' : auto.cls}`;
+      pill.textContent = f.override && f.value ? f.value : auto.label;
+      if (f.override && f.value) {
+        pill.style.cssText = 'background:rgba(0,212,200,0.1);border-color:var(--acc);color:#007d75;border-width:2px;';
+      }
+      pill.title = 'Click to override';
+      const finI = document.createElement('input');
+      finI.className = 'final-inp'; finI.value = f.value || ''; finI.placeholder = auto.label;
+      finI.addEventListener('input', () => { f.value = finI.value; f.override = true; schedulePush(1200); });
+      finI.addEventListener('blur', () => {
+        if (!finI.value.trim()) { f.override = false; f.value = ''; }
+        renderTable(); updateStats();
+      });
+      finI.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { f.override = false; f.value = ''; renderTable(); updateStats(); }
+        if (e.key === 'Enter') finI.blur();
+      });
+      pill.onclick = () => { pill.style.display='none'; finI.style.display='block'; resetBtn.classList.add('visible'); finI.focus(); finI.select(); };
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'final-reset' + (f.override && f.value ? ' visible' : '');
+      resetBtn.textContent = '↺'; resetBtn.title = 'Reset to auto tally (' + auto.label + ')';
+      resetBtn.onclick = e => { e.stopPropagation(); f.override=false; f.value=''; renderTable(); updateStats(); schedulePush(); };
+      const finalWrap = document.createElement('div'); finalWrap.className = 'final-wrap';
+      finalWrap.append(pill, finI, resetBtn); tdF.appendChild(finalWrap);
+
+      // Delete
+      const tdD = document.createElement('td'); tdD.className = 'c-del';
+      const db = document.createElement('button'); db.className = 'del-btn'; db.textContent = '🗑';
+      db.title = 'Delete item (click once to arm, click again to confirm)';
+      db.onclick = () => {
+        if (db.dataset.armed === '1') {
+          deleteItemFull(n);
+          refreshAllPins();
+          renderTable();
+        } else {
+          db.dataset.armed = '1';
+          db.textContent = '✓?';
+          db.style.color = 'var(--disc-fg)';
+          setTimeout(() => {
+            if (db.isConnected) {
+              db.dataset.armed = '0';
+              db.textContent = '🗑';
+              db.style.color = '';
+            }
+          }, 2000);
+        }
+      };
+      tdD.appendChild(db);
+
+      tr.append(tdN, tdPh, tdName, tdV, tdNt, tdF, tdD);
+      tbody.appendChild(tr);
+    });
+
+  updateStats();
+}
+
+function autoH(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
+
+function calcAuto(n) {
+  const v = votes[n]; let k=0, d=0, tot=0;
+  VOTERS.forEach(vt => { if(v[vt]==='K'){k++;tot++;} else if(v[vt]==='D'){d++;tot++;} });
+  if (!tot) return { cls:'pending', label:'Pending' };
+  if (k > d) return { cls:'keep',    label:'Keep' };
+  if (d > k) return { cls:'discard', label:'Discard' };
+  return { cls:'tie', label:'Tie' };
+}
+
+function updateStats() {
+  let k=0, d=0, tie=0, pend=0;
+  items.forEach(it => {
+    const f = finals[it.n], a = calcAuto(it.n);
+    const v = f.override && f.value ? f.value.toLowerCase() : a.cls;
+    if (v === 'keep' || v.includes('keep')) k++;
+    else if (v === 'discard' || v.includes('dis')) d++;
+    else if (v === 'tie') tie++;
+    else pend++;
+  });
+  const s = `<span>Total <b>${items.length}</b></span>
+    <span class="k">Keep <b>${k}</b></span>
+    <span class="d">Discard <b>${d}</b></span>
+    <span class="t">Tie <b>${tie}</b></span>
+    <span>Pending <b>${pend}</b></span>`;
+  document.getElementById('statsBar').innerHTML = s;
+  document.getElementById('tStats').innerHTML = `
+    <span class="ts">Total <b>${items.length}</b></span>
+    <span class="ts">Keep <b class="k">${k}</b></span>
+    <span class="ts">Discard <b class="d">${d}</b></span>
+    <span class="ts">Tie <b class="t">${tie}</b></span>
+    <span class="ts">Pending <b>${pend}</b></span>`;
+}
+
+// ── Manual add item ──
+function addItemManual() {
+  const inp = document.getElementById('newItemInp');
+  const name = inp.value.trim() || `Item ${nextN}`;
+  const n = mkItem(name);
+  inp.value = '';
+  renderTable();
+  selectItem(n);
+  schedulePush();
+  document.getElementById('tScroll').scrollTop = document.getElementById('tScroll').scrollHeight;
+}
+
+// ══════════════════════════════════════════════
+// AI AUTO-LABEL
+// ══════════════════════════════════════════════
+async function autoLabel(ph, wrap, btn) {
+  if (!ph.img) { alert('Load a photo first.'); return; }
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey) { alert('Paste your Anthropic API key in the top bar first (sk-ant-…).'); return; }
+
+  if (ph.labels.length > 0) {
+    if (!confirm(`This photo already has ${ph.labels.length} labels. New items will be added alongside them. Continue?`)) return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Analysing…';
+
+  try {
+    const base64   = ph.img.split(',')[1];
+    const mimeType = (ph.img.match(/^data:([^;]+);/) || ['','image/jpeg'])[1];
+
+    const prompt = `Analyse this storage space photo. Identify every distinct visible item or group.
+
+For each item return:
+- "name": short descriptive label (2-5 words)  
+- "x": horizontal centre position as fraction 0.0–1.0 from left
+- "y": vertical centre position as fraction 0.0–1.0 from top
+
+Respond with ONLY a raw JSON array. No explanation, no markdown, no code fences.
+Example: [{"name":"Wooden chair","x":0.23,"y":0.61},{"name":"Cardboard box","x":0.55,"y":0.30}]
+
+Be thorough — identify every visible distinct item.`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-5',
+        max_tokens: 2000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${res.status}`);
+    }
+
+    const data     = await res.json();
+    const raw      = data.content[0].text.trim();
+    const clean    = raw.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim();
+    const detected = JSON.parse(clean);
+
+    if (!Array.isArray(detected) || detected.length === 0) throw new Error('No items returned.');
+
+    detected.forEach(d => {
+      const name = (d.name || 'Unknown item').trim();
+      const x    = Math.max(0.01, Math.min(0.99, parseFloat(d.x) || 0.5));
+      const y    = Math.max(0.01, Math.min(0.99, parseFloat(d.y) || 0.5));
+      const n    = mkItem(name);
+      ph.labels.push({ n, x, y });
+    });
+
+    // rebuild canvas wrap to get fresh pins
+    wrap.querySelector('.canvas-wrap') && wrap.querySelector('.canvas-wrap').remove();
+    wrap.appendChild(makeCanvasWrap(ph));
+    renderTable();
+
+    btn.disabled = false;
+    btn.textContent = 'Auto-label';
+    schedulePush();
+    btn.textContent = `+ ${detected.length} labels`;
+    setTimeout(() => { btn.textContent = 'Auto-label'; }, 3000);
+
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Auto-label';
+    alert('Auto-label failed: ' + err.message);
+    console.error(err);
+  }
+}
+
+// ══════════════════════════════════════════════
+// SAVE / LOAD
+// ══════════════════════════════════════════════
+function saveData() {
+  const data = {
+    v: 2, nextN, nextPhotoId, items, votes, notes: notesMap, finals,
+    photos: photos.map(({ id, name, img, labels }) => ({ id, name, img, labels }))
+  };
+  const a = document.createElement('a');
+  a.download = 'storage_save.json';
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+function loadData(inp) {
+  if (!inp.files[0]) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try {
+      const d = JSON.parse(ev.target.result);
+      items = d.items; votes = d.votes; notesMap = d.notes || {}; finals = d.finals;
+      nextN = d.nextN || 1; nextPhotoId = d.nextPhotoId || 1;
+      photos = d.photos.map(p => ({ ...p, imgEl: null }));
+      let pending = photos.filter(p => p.img).length;
+      const done = () => { rebuildPhotoBlocks(); renderTable(); };
+      if (!pending) { done(); return; }
+      photos.forEach(ph => {
+        if (!ph.img) { pending--; if (!pending) done(); return; }
+        const img = new Image();
+        img.onload = () => { ph.imgEl = img; pending--; if (!pending) done(); };
+        img.src = ph.img;
+      });
+    } catch(e) { alert('Could not load file: ' + e.message); }
+  };
+  r.readAsText(inp.files[0]);
+  inp.value = '';
+}
+
+function rebuildPhotoBlocks() {
+  const col = document.getElementById('photosCol');
+  col.querySelectorAll('.photo-block').forEach(e => e.remove());
+  const addBtn = document.getElementById('addPhotoBtn');
+  photos.forEach(ph => col.insertBefore(buildPhotoBlock(ph), addBtn));
+}
+
+// ══════════════════════════════════════════════
+// EXPORT
+// ══════════════════════════════════════════════
+function exportPhoto(ph) {
+  if (!ph.imgEl) { alert('No photo loaded for ' + ph.name); return; }
+  const img = ph.imgEl;
+  const ec = document.createElement('canvas');
+  ec.width = img.naturalWidth; ec.height = img.naturalHeight;
+  const c = ec.getContext('2d'); c.drawImage(img, 0, 0);
+
+  // Scale relative to image size — smaller, cleaner labels
+  const S = Math.max(1, Math.min(3, img.naturalWidth / 1800));
+  const r = 16 * S;
+  const fs = 11 * S;
+  const pad = 4 * S;
+
+  // Sort labels so we can detect overlaps and offset them
+  const placed = [];
+
+  ph.labels.forEach(pos => {
+    const item = items.find(it => it.n === pos.n); if (!item) return;
+    const auto = calcAuto(item.n);
+    let px = pos.x * img.naturalWidth;
+    let py = pos.y * img.naturalHeight;
+
+    // Dot
+    c.save();
+    // Shadow
+    c.beginPath(); c.arc(px, py, r+2*S, 0, Math.PI*2);
+    c.fillStyle='rgba(0,0,0,0.3)'; c.fill();
+    // Colour by vote status
+    const dotCol = auto.cls === 'keep' ? '#2ecc88' : auto.cls === 'discard' ? '#ff6b6b' : auto.cls === 'tie' ? '#f0a500' : '#00d4c8';
+    c.beginPath(); c.arc(px, py, r, 0, Math.PI*2);
+    c.fillStyle = dotCol; c.fill();
+    c.lineWidth = 1.5*S; c.strokeStyle='rgba(0,0,0,0.45)'; c.stroke();
+
+    // Number
+    c.fillStyle = auto.cls === 'keep' || auto.cls === 'discard' ? '#fff' : '#000';
+    c.font = `bold ${fs*1.1}px Arial`;
+    c.textAlign='center'; c.textBaseline='middle';
+    c.fillText(String(pos.n), px, py);
+
+    // Label tag — try right side, flip to left if too close to edge
+    c.font = `500 ${fs}px Arial`;
+    const tw = c.measureText(item.t).width;
+    const tagW = tw + pad*2;
+    const tagH = fs + pad*2;
+    let lx = px + r + 5*S;
+    const ly = py - tagH/2;
+    if (lx + tagW > img.naturalWidth - 10) lx = px - r - 5*S - tagW;
+
+    // Semi-transparent background
+    c.fillStyle='rgba(6,6,9,0.88)';
+    roundRect(c, lx - pad, ly, tagW, tagH, 3*S);
+    c.fill();
+    c.strokeStyle='rgba(255,255,255,0.12)'; c.lineWidth=1*S;
+    c.stroke();
+
+    c.fillStyle='#fff'; c.textAlign='left'; c.textBaseline='top';
+    c.fillText(item.t, lx, ly + pad);
+    c.restore();
+
+    placed.push({px, py, r, lx, ly, tagW, tagH});
+  });
+
+  const a = document.createElement('a');
+  a.download = `${ph.name.replace(/[^a-z0-9]/gi,'_')}_annotated.jpg`;
+  a.href = ec.toDataURL('image/jpeg', 0.93); a.click();
+}
+
+function roundRect(ctx, x, y, w, h, rad) {
+  ctx.beginPath();
+  ctx.moveTo(x+rad, y);
+  ctx.lineTo(x+w-rad, y); ctx.arcTo(x+w, y, x+w, y+rad, rad);
+  ctx.lineTo(x+w, y+h-rad); ctx.arcTo(x+w, y+h, x+w-rad, y+h, rad);
+  ctx.lineTo(x+rad, y+h); ctx.arcTo(x, y+h, x, y+h-rad, rad);
+  ctx.lineTo(x, y+rad); ctx.arcTo(x, y, x+rad, y, rad);
+  ctx.closePath();
+}
+
+function exportCSV() {
+  const rows = [['#','Photo','Item','SG','AM','ZG','KJ','Notes','Final']];
+  items.forEach(it => {
+    const v=votes[it.n], f=finals[it.n], a=calcAuto(it.n);
+    const ph = photoForItem(it.n);
+    rows.push([it.n, ph?ph.name:'', `"${it.t.replace(/"/g,'""')}"`,
+      v.SG||'', v.AM||'', v.ZG||'', v.KJ||'',
+      `"${(notesMap[it.n]||'').replace(/"/g,'""')}"`,
+      f.override&&f.value ? f.value : a.label]);
+  });
+  const a = document.createElement('a'); a.download='storage_decisions.csv';
+  a.href = URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));
+  a.click();
+}
+
+// ══════════════════════════════════════════════
+// RESIZER
+// ══════════════════════════════════════════════
+(function() {
+  const resizer = document.getElementById('resizer');
+  const photosCol = document.getElementById('photosCol');
+  const tableCol  = document.getElementById('tableCol');
+  const layout    = document.getElementById('layout');
+  let active = false;
+  resizer.addEventListener('mousedown', e => { active=true; resizer.classList.add('active'); e.preventDefault(); document.body.style.cssText='cursor:col-resize;user-select:none'; });
+  document.addEventListener('mousemove', e => {
+    if (!active) return;
+    const r = layout.getBoundingClientRect();
+    let lw = Math.max(220, Math.min(r.width-305, e.clientX - r.left));
+    photosCol.style.width = lw + 'px';
+    tableCol.style.width  = (r.width - lw - 5) + 'px';
+    photos.forEach(ph => refreshPins(ph));
+  });
+  document.addEventListener('mouseup', () => { if(!active)return; active=false; resizer.classList.remove('active'); document.body.style.cssText=''; });
+})();
+
+
+// ── EXPORT STANDALONE HTML ──
+function exportStandaloneHTML() {
+  const saveData = {
+    v: 2, nextN, nextPhotoId, items, votes, notes: notesMap, finals,
+    photos: photos.map(({ id, name, img, labels }) => ({ id, name, img, labels }))
+  };
+  const dataJson = JSON.stringify(saveData);
+  // Grab this page's HTML and inject the save data as auto-loading seed
+  const originalHtml = document.documentElement.outerHTML;
+  const injected = originalHtml.replace(
+    '// ══════════════════════════════════════════════\n// INIT',
+    `// ── UNSAVED INDICATOR ──
+function markUnsaved() {
+  const dot = document.getElementById('unsavedDot');
+  if (dot) dot.style.display = 'inline-block';
+}
+function clearUnsaved() {
+  const dot = document.getElementById('unsavedDot');
+  if (dot) dot.style.display = 'none';
+}
+
+// ── HELP ──
+function toggleHelp() { document.getElementById('helpOverlay').classList.toggle('hidden'); }
+function closeHelpIfBg(e) { if (e.target===document.getElementById('helpOverlay')) toggleHelp(); }
+document.addEventListener('keydown', e => { if(e.key==='Escape') document.getElementById('helpOverlay').classList.add('hidden'); });
+
+// ── AUTO-LOADED DATA ──
+const _BAKED_DATA = ${dataJson};
+(function() {
+  try {
+    const d = _BAKED_DATA;
+    items = d.items; votes = d.votes; notesMap = d.notes || {}; finals = d.finals;
+    nextN = d.nextN || 1; nextPhotoId = d.nextPhotoId || 1;
+    photos = d.photos.map(p => ({ ...p, imgEl: null }));
+    let pending = photos.filter(p => p.img).length;
+    const done = () => { rebuildPhotoBlocks(); renderTable(); };
+    if (!pending) { setTimeout(done, 100); return; }
+    photos.forEach(ph => {
+      if (!ph.img) { pending--; if (!pending) done(); return; }
+      const img = new Image();
+      img.onload = () => { ph.imgEl = img; pending--; if (!pending) done(); };
+      img.src = ph.img;
+    });
+  } catch(e) { console.error('Auto-load failed', e); }
+})();
+
+// ══════════════════════════════════════════════\n// INIT`
+  );
+  const blob = new Blob([injected], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.download = 'storage_decisions_shared.html';
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+
+// ══════════════════════════════════════════════
+// FIREBASE REAL-TIME SYNC
+// ══════════════════════════════════════════════
+let db = null;
+let fbConfig = null;
+let syncListeners = [];
+let isSyncing = false;
+let localChange = false; // flag to avoid echo updates
+
+const COLLECTION = 'storage_decisions';
+const DOC_ITEMS   = 'items';
+const DOC_VOTES   = 'votes';
+const DOC_NOTES   = 'notes';
+const DOC_FINALS  = 'finals';
+const DOC_PHOTOS  = 'photo_labels'; // positions only, not image data
+
+function setSyncStatus(state, msg) {
+  const dot = document.getElementById('syncDot');
+  const lbl = document.getElementById('syncLabel');
+  if (!dot) return;
+  dot.className = 'sync-dot ' + state;
+  lbl.textContent = msg;
+}
+
+function showFirebaseSetup() {
+  document.getElementById('fbSetup').classList.remove('hidden');
+}
+
+function handlePasteConfig() {
+  const text = prompt('Paste your entire firebaseConfig object or just the values block:');
+  if (!text) return;
+  const fields = {
+    apiKey:            /apiKey\s*:\s*["']([^"']+)["']/,
+    projectId:         /projectId\s*:\s*["']([^"']+)["']/,
+    appId:             /appId\s*:\s*["']([^"']+)["']/,
+    authDomain:        /authDomain\s*:\s*["']([^"']+)["']/,
+    storageBucket:     /storageBucket\s*:\s*["']([^"']+)["']/,
+    messagingSenderId: /messagingSenderId\s*:\s*["']([^"']+)["']/,
+  };
+  let found = 0;
+  Object.entries(fields).forEach(([key, rx]) => {
+    const m = text.match(rx);
+    if (m) { document.getElementById('fb-'+key).value = m[1]; found++; }
+  });
+  if (found >= 3) {
+    document.getElementById('pasteHint').textContent = `✓ Parsed ${found}/6 fields — review below and click Connect`;
+    document.getElementById('pasteHint').style.borderColor = 'var(--keep-fg)';
+  }
+}
+
+const BAKED_CONFIG = null;
+
+function connectFirebase() {
+  const get = id => document.getElementById(id).value.trim();
+  const isBlank = v => !v || v.includes('...') || v.startsWith('my-') || v === '123456789';
+  const cfg = {
+    apiKey:            isBlank(get('fb-apiKey'))            ? BAKED_CONFIG.apiKey            : get('fb-apiKey'),
+    projectId:         isBlank(get('fb-projectId'))         ? BAKED_CONFIG.projectId         : get('fb-projectId'),
+    appId:             isBlank(get('fb-appId'))             ? BAKED_CONFIG.appId             : get('fb-appId'),
+    authDomain:        isBlank(get('fb-authDomain'))        ? BAKED_CONFIG.authDomain        : get('fb-authDomain'),
+    storageBucket:     isBlank(get('fb-storageBucket'))     ? BAKED_CONFIG.storageBucket     : get('fb-storageBucket'),
+    messagingSenderId: isBlank(get('fb-messagingSenderId')) ? BAKED_CONFIG.messagingSenderId : get('fb-messagingSenderId'),
+  };
+  document.getElementById('fbSetup').classList.add('hidden');
+  initFirebase(cfg);
+}
+
+function initFirebase(cfg) {
+  try {
+    // Avoid re-initialising if already done
+    if (!firebase.apps.length) {
+      firebase.initializeApp(cfg);
+    }
+    db = firebase.firestore();
+    fbConfig = cfg;
+    setSyncStatus('syncing', 'Connecting…');
+
+    // Push current local data up first, then start listening
+    pushAllToFirebase().then(() => {
+      listenToFirebase();
+      setSyncStatus('connected', 'Live sync');
+      document.getElementById('fbSetupBtn').textContent = '✓ Firebase';
+      document.getElementById('fbSetupBtn').style.color = 'var(--keep-fg)';
+      // Save config to localStorage so it persists on reload
+      try { localStorage.setItem('fbConfig', JSON.stringify(cfg)); } catch(e){}
+    }).catch(err => {
+      setSyncStatus('error', 'Sync error');
+      console.error('Firebase push failed:', err);
+    });
+  } catch(err) {
+    setSyncStatus('error', 'Config error');
+    alert('Firebase error: ' + err.message);
+  }
+}
+
+async function pushAllToFirebase() {
+  if (!db) return;
+  const batch = db.batch();
+  const col = db.collection(COLLECTION);
+
+  // items + metadata
+  batch.set(col.doc(DOC_ITEMS), {
+    items: items,
+    nextN: nextN,
+    nextPhotoId: nextPhotoId
+  });
+
+  // votes (convert int keys to strings for Firestore)
+  const votesOut = {};
+  Object.keys(votes).forEach(k => { votesOut['n'+k] = votes[k]; });
+  batch.set(col.doc(DOC_VOTES), votesOut);
+
+  // notes
+  const notesOut = {};
+  Object.keys(notesMap).forEach(k => { notesOut['n'+k] = notesMap[k]; });
+  batch.set(col.doc(DOC_NOTES), notesOut);
+
+  // finals
+  const finalsOut = {};
+  Object.keys(finals).forEach(k => { finalsOut['n'+k] = finals[k]; });
+  batch.set(col.doc(DOC_FINALS), finalsOut);
+
+  // photo labels (positions)
+  const labelsOut = {};
+  photos.forEach(ph => { labelsOut['p'+ph.id] = { name: ph.name, id: ph.id, labels: ph.labels }; });
+  batch.set(col.doc(DOC_PHOTOS), labelsOut);
+  await batch.commit();
+
+  await Promise.all(photos.filter(ph => ph.img).map(async ph => {
+    try {
+      await col.doc('photo_images_' + ph.id).set({ id: ph.id, name: ph.name, img: ph.img });
+    } catch(e) { console.warn('Photo too large, skipping:', ph.name); }
+  }));
+}
+
+function listenToFirebase() {
+  if (!db) return;
+  const col = db.collection(COLLECTION);
+
+  // Listen to votes
+  syncListeners.push(col.doc(DOC_VOTES).onSnapshot(snap => {
+    if (!snap.exists || localChange) return;
+    const data = snap.data();
+    Object.keys(data).forEach(k => {
+      const n = parseInt(k.replace('n',''));
+      if (!isNaN(n)) votes[n] = data[k];
+    });
+    renderTable();
+    refreshAllPins();
+    setSyncStatus('connected', 'Live sync');
+  }));
+
+  // Listen to items
+  syncListeners.push(col.doc(DOC_ITEMS).onSnapshot(snap => {
+    if (!snap.exists || localChange) return;
+    const data = snap.data();
+    if (data.items) {
+      // Merge — add any items we don't have, update names
+      data.items.forEach(incoming => {
+        const existing = items.find(it => it.n === incoming.n);
+        if (existing) { existing.t = incoming.t; }
+        else {
+          items.push(incoming);
+          if (!votes[incoming.n]) votes[incoming.n] = {SG:null,AM:null,ZG:null,KJ:null};
+          if (!notesMap[incoming.n]) notesMap[incoming.n] = '';
+          if (!finals[incoming.n]) finals[incoming.n] = {override:false,value:''};
+        }
+      });
+      // Remove deleted items
+      const incomingNs = new Set(data.items.map(it => it.n));
+      items = items.filter(it => incomingNs.has(it.n));
+      if (data.nextN > nextN) nextN = data.nextN;
+    }
+    renderTable();
+    refreshAllPins();
+    setSyncStatus('connected', 'Live sync');
+  }));
+
+  // Listen to notes
+  syncListeners.push(col.doc(DOC_NOTES).onSnapshot(snap => {
+    if (!snap.exists || localChange) return;
+    const data = snap.data();
+    Object.keys(data).forEach(k => {
+      const n = parseInt(k.replace('n',''));
+      if (!isNaN(n)) notesMap[n] = data[k];
+    });
+    renderTable();
+  }));
+
+  // Listen to finals
+  syncListeners.push(col.doc(DOC_FINALS).onSnapshot(snap => {
+    if (!snap.exists || localChange) return;
+    const data = snap.data();
+    Object.keys(data).forEach(k => {
+      const n = parseInt(k.replace('n',''));
+      if (!isNaN(n)) finals[n] = data[k];
+    });
+    renderTable();
+  }));
+
+  // Listen to photo labels (positions)
+  syncListeners.push(col.doc(DOC_PHOTOS).onSnapshot(snap => {
+    if (!snap.exists || localChange) return;
+    const data = snap.data();
+    Object.keys(data).forEach(k => {
+      const incoming = data[k];
+      const ph = photos.find(p => p.id === incoming.id);
+      if (ph) { ph.labels = incoming.labels; ph.name = incoming.name; refreshPins(ph); }
+    });
+    renderTable();
+  }));
+
+  // Listen to photo images
+  photos.forEach(ph => {
+    syncListeners.push(col.doc('photo_images_' + ph.id).onSnapshot(snap => {
+      if (!snap.exists || localChange) return;
+      const data = snap.data();
+      if (data && data.img && !ph.img) {
+        const img = new Image();
+        img.onload = () => {
+          ph.img = data.img; ph.imgEl = img; ph.name = data.name || ph.name;
+          const wrap = document.querySelector('.photo-block[data-pid="' + ph.id + '"]');
+          if (wrap) {
+            wrap.querySelector('.drop-area,.drop-zone') && wrap.querySelector('.drop-area,.drop-zone').remove();
+            wrap.querySelector('.canvas-wrap') && wrap.querySelector('.canvas-wrap').remove();
+            wrap.appendChild(makeCanvasWrap(ph));
+            const ni = wrap.querySelector('.pb-name'); if (ni) ni.value = ph.name;
+            setSyncStatus('connected', 'Live sync — photo loaded');
+            setTimeout(() => setSyncStatus('connected', 'Live sync'), 3000);
+          }
+        };
+        img.src = data.img;
+      }
+    }));
+  });
+}
+
+// Debounced push — batches rapid edits into one write
+let pushTimer = null;
+function schedulePush(delayMs = 800) {
+  if (!db) return;
+  setSyncStatus('syncing', 'Saving…');
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(async () => {
+    localChange = true;
+    try {
+      await pushAllToFirebase();
+      setSyncStatus('connected', 'Live sync');
+    } catch(e) {
+      setSyncStatus('error', 'Save failed');
+      console.error(e);
+    }
+    setTimeout(() => { localChange = false; }, 500);
+  }, delayMs);
+}
+
+// Auto-reconnect from localStorage on page load
+(function tryAutoConnect() {
+  try {
+    const saved = localStorage.getItem('fbConfig');
+    if (saved) { initFirebase(JSON.parse(saved)); return; }
+  } catch(e) {}
+  // Auto-connect with baked config
+  setTimeout(() => initFirebase(BAKED_CONFIG), 600);
+})();
+
+// ══════════════════════════════════════════════
+// INIT — build the 4 seed photo slots (empty, ready to load)
+// ══════════════════════════════════════════════
+// ── LOAD BAKED DATA ──
+(function() {
+  const d = {"v": 2, "nextN": 28, "nextPhotoId": 5, "items": [{"n": 1, "t": "? bbq tools? szerszamok?"}, {"n": 2, "t": "? bbq tools? "}, {"n": 3, "t": "asztal - kinyithato, uvegezett"}, {"n": 4, "t": "ejjeliszekreny"}, {"n": 5, "t": "karnisok - rez"}, {"n": 6, "t": "karosszekek - karpitozott barsony"}, {"n": 7, "t": "janos szekrenye"}, {"n": 8, "t": "karpitozott szek"}, {"n": 9, "t": "varrogep"}, {"n": 10, "t": "szivacs matrac"}, {"n": 11, "t": "kerek asztal"}, {"n": 12, "t": "? agybetet?"}, {"n": 14, "t": "polc"}, {"n": 15, "t": "keramit lapok - sarga"}, {"n": 16, "t": "tegla"}, {"n": 17, "t": "cserep"}, {"n": 18, "t": "holapat, aso, kerti szerszamok"}, {"n": 19, "t": "Item 19"}, {"n": 20, "t": "iroasztal"}, {"n": 21, "t": "bakok"}, {"n": 22, "t": "faanyag"}, {"n": 24, "t": "liografia - kolap"}, {"n": 25, "t": "kisasztal- fekete uveggel"}, {"n": 26, "t": "rajzbak"}, {"n": 27, "t": "funyiro"}], "votes": {"1": {"SG": null, "AM": null, "ZG": null, "KJ": null}, "2": {"SG": null, "AM": null, "ZG": null, "KJ": null}, "3": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "4": {"SG": null, "AM": null, "ZG": "D", "KJ": null}, "5": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "6": {"SG": null, "AM": null, "ZG": "D", "KJ": null}, "7": {"SG": null, "AM": null, "ZG": "D", "KJ": null}, "8": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "9": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "10": {"SG": null, "AM": null, "ZG": "D", "KJ": null}, "11": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "12": {"SG": null, "AM": null, "ZG": "D", "KJ": null}, "14": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "15": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "16": {"SG": null, "AM": null, "ZG": null, "KJ": null}, "17": {"SG": null, "AM": null, "ZG": null, "KJ": null}, "18": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "19": {"SG": null, "AM": null, "ZG": null, "KJ": null}, "20": {"SG": null, "AM": null, "ZG": "D", "KJ": null}, "21": {"SG": null, "AM": null, "ZG": "D", "KJ": null}, "22": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "24": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "25": {"SG": null, "AM": null, "ZG": "K", "KJ": null}, "26": {"SG": null, "AM": null, "ZG": "D", "KJ": null}, "27": {"SG": null, "AM": null, "ZG": "K", "KJ": null}}, "notes": {"1": "karton doboz?", "2": "bbq tools?", "3": "", "4": "", "5": "", "6": "2db?", "7": "ures?", "8": "", "9": "", "10": "", "11": "", "12": "agybetet?", "14": "ffurdoszobabol?", "15": "", "16": "", "17": "uj, vagy regi?", "18": "", "19": "", "20": "", "21": "festo?", "22": "", "24": "zsofie", "25": "", "26": "adam, gergo, festok?", "27": "ha van benne funyiro, es a mienk"}, "finals": {"1": {"override": false, "value": ""}, "2": {"override": false, "value": ""}, "3": {"override": false, "value": ""}, "4": {"override": false, "value": ""}, "5": {"override": false, "value": ""}, "6": {"override": false, "value": ""}, "7": {"override": false, "value": ""}, "8": {"override": false, "value": ""}, "9": {"override": false, "value": ""}, "10": {"override": false, "value": ""}, "11": {"override": false, "value": ""}, "12": {"override": false, "value": ""}, "14": {"override": false, "value": ""}, "15": {"override": false, "value": ""}, "16": {"override": false, "value": ""}, "17": {"override": false, "value": ""}, "18": {"override": false, "value": ""}, "19": {"override": false, "value": ""}, "20": {"override": false, "value": ""}, "21": {"override": false, "value": ""}, "22": {"override": false, "value": ""}, "24": {"override": false, "value": ""}, "25": {"override": false, "value": ""}, "26": {"override": false, "value": ""}, "27": {"override": false, "value": ""}}, "photos": [{"id": 1, "name": "Screenshot 2026-03-16 at 3.23.43\u202fPM", "img": null, "labels": [{"n": 1, "x": 0.6520644781234939, "y": 0.21971985718209286}, {"n": 2, "x": 0.7805922990413968, "y": 0.2278808804488563}, {"n": 3, "x": 0.38044234991699255, "y": 0.5411386196884687}, {"n": 4, "x": 0.7000481979328443, "y": 0.4858947698826853}, {"n": 5, "x": 0.38044234991699244, "y": 0.45073959273355046}, {"n": 6, "x": 0.3701601242435602, "y": 0.37226821516851727}, {"n": 7, "x": 0.7446045091843839, "y": 0.26491937065955196}, {"n": 8, "x": 0.2082150698870026, "y": 0.9090124377133441}, {"n": 9, "x": 0.05312483264606652, "y": 0.7175422764546632}, {"n": 10, "x": 0.40443420982166767, "y": 0.25989720249538983}, {"n": 11, "x": 0.8054410110855246, "y": 0.6679483658335623}, {"n": 12, "x": 0.10967707384994377, "y": 0.32957978577313923}, {"n": 20, "x": 0.556097038504793, "y": 0.6622984266488798}]}, {"id": 2, "name": "Screenshot 2026-03-16 at 3.23.57\u202fPM", "img": null, "labels": [{"n": 14, "x": 0.4558453381888288, "y": 0.8533888737493673}, {"n": 21, "x": 0.8979810421464146, "y": 0.47903608829368943}, {"n": 22, "x": 0.8911262250307931, "y": 0.29653131934441546}]}, {"id": 3, "name": "Screenshot 2026-03-16 at 3.24.03\u202fPM", "img": null, "labels": [{"n": 15, "x": 0.34959567289669574, "y": 0.699684042688474}, {"n": 16, "x": 0.47555293739624055, "y": 0.7240998151209539}, {"n": 17, "x": 0.5278209179028543, "y": 0.6013949075115672}, {"n": 18, "x": 0.9613881004659134, "y": 0.7923387688425007}, {"n": 24, "x": 0.6143629839875756, "y": 0.4761858181142337}]}, {"id": 4, "name": "Screenshot 2026-03-16 at 3.24.09\u202fPM", "img": null, "labels": [{"n": 25, "x": 0.6015102018957854, "y": 0.8895740672402742}, {"n": 26, "x": 0.4078616183794784, "y": 0.472536756851244}, {"n": 27, "x": 0.3590210464306753, "y": 0.6217006234583488}]}]};
+  items = d.items;
+  // normalise vote keys (may be string or int)
+  const rawVotes = d.votes || {};
+  Object.keys(rawVotes).forEach(k => { votes[parseInt(k)] = rawVotes[k]; });
+  const rawNotes = d.notes || {};
+  Object.keys(rawNotes).forEach(k => { notesMap[parseInt(k)] = rawNotes[k]; });
+  const rawFinals = d.finals || {};
+  Object.keys(rawFinals).forEach(k => { finals[parseInt(k)] = rawFinals[k]; });
+  nextN = d.nextN || 1;
+  nextPhotoId = d.nextPhotoId || 1;
+  photos = d.photos.map(p => ({ ...p, imgEl: null }));
+  let pending = photos.filter(p => p.img).length;
+  const done = () => { rebuildPhotoBlocks(); renderTable(); };
+  if (!pending) { setTimeout(done, 50); return; }
+  photos.forEach(ph => {
+    if (!ph.img) { pending--; if (!pending) done(); return; }
+    const img = new Image();
+    img.onload = () => { ph.imgEl = img; pending--; if (!pending) done(); };
+    img.src = ph.img;
+  });
+})();
+</script>
+</body>
+</html>
